@@ -1,14 +1,14 @@
 import asyncio
 import json
 import websockets
-import time # Import the time module
+import time
 from gpiozero import RotaryEncoder, Button
 
 # --- Konfiguration ---
 SNAPCAST_URI = "ws://beatnik-server.local:1780/jsonrpc"
 SNAPCAST_CLIENT_ID = "2c:cf:67:d4:b1:95"
 VOLUME_STEP = 5
-THROTTLE_INTERVAL_S = 0.05 # --- NEW: Send updates at most every 50ms ---
+DEBOUNCE_DELAY_S = 0.1 # --- NEW: Wait 100ms after the last turn to send the command ---
 
 # --- GPIO Konfiguration ---
 PIN_CLK = 17
@@ -19,7 +19,7 @@ PIN_SW = 27
 current_volume = 0
 is_muted = False
 websocket = None
-last_command_time = 0 # --- NEW: Timestamp for throttling ---
+debounce_timer_task = None # --- NEW: Task for debouncing ---
 
 # --- Initialisierung der GPIO-Komponenten ---
 encoder = RotaryEncoder(PIN_CLK, PIN_DT, max_steps=0, wrap=False)
@@ -34,6 +34,14 @@ async def send_rpc_request(method, params={}, request_id=None):
             request_id = int(time.time())
         request = {"id": request_id, "jsonrpc": "2.0", "method": method, "params": params}
         await websocket.send(json.dumps(request))
+
+# --- NEW: An async task that sends the volume after a delay ---
+async def debounced_volume_sender():
+    """Waits for the debounce delay, then sends the final volume."""
+    await asyncio.sleep(DEBOUNCE_DELAY_S)
+    print(f"⚡️ Sending debounced volume: {current_volume}%")
+    volume_payload = {"percent": current_volume, "muted": is_muted}
+    await send_rpc_request("Client.SetVolume", {"id": SNAPCAST_CLIENT_ID, "volume": volume_payload})
 
 def handle_notification(data):
     """Parses notifications from the server and updates the authoritative state."""
@@ -69,38 +77,31 @@ def handle_initial_state(data):
 
 # --- GPIO Callback-Funktionen ---
 
+def update_volume_and_debounce():
+    """Cancels any pending send and schedules a new one."""
+    global debounce_timer_task
+    # Cancel the previously scheduled task, if any
+    if debounce_timer_task:
+        debounce_timer_task.cancel()
+    # Schedule the new task to run after the delay
+    debounce_timer_task = asyncio.run_coroutine_threadsafe(debounced_volume_sender(), main_loop)
+
 def on_rotate_clockwise():
-    """Increase volume, with throttling."""
-    global current_volume, last_command_time
-    now = time.monotonic()
-    # --- CHANGE: Check if enough time has passed ---
-    if (now - last_command_time) > THROTTLE_INTERVAL_S:
-        current_volume = min(100, current_volume + VOLUME_STEP)
-        print(f"-> Knob set to: {current_volume}%")
-        volume_payload = {"percent": current_volume, "muted": is_muted}
-        asyncio.run_coroutine_threadsafe(
-            send_rpc_request("Client.SetVolume", {"id": SNAPCAST_CLIENT_ID, "volume": volume_payload}),
-            main_loop
-        )
-        last_command_time = now # Update the timestamp
+    """Increase volume locally and trigger the debouncer."""
+    global current_volume
+    current_volume = min(100, current_volume + VOLUME_STEP)
+    print(f"-> Knob set to: {current_volume}%")
+    update_volume_and_debounce()
 
 def on_rotate_counter_clockwise():
-    """Decrease volume, with throttling."""
-    global current_volume, last_command_time
-    now = time.monotonic()
-    # --- CHANGE: Check if enough time has passed ---
-    if (now - last_command_time) > THROTTLE_INTERVAL_S:
-        current_volume = max(0, current_volume - VOLUME_STEP)
-        print(f"<- Knob set to: {current_volume}%")
-        volume_payload = {"percent": current_volume, "muted": is_muted}
-        asyncio.run_coroutine_threadsafe(
-            send_rpc_request("Client.SetVolume", {"id": SNAPCAST_CLIENT_ID, "volume": volume_payload}),
-            main_loop
-        )
-        last_command_time = now # Update the timestamp
+    """Decrease volume locally and trigger the debouncer."""
+    global current_volume
+    current_volume = max(0, current_volume - VOLUME_STEP)
+    print(f"<- Knob set to: {current_volume}%")
+    update_volume_and_debounce()
 
 def on_button_press():
-    """Request to toggle mute."""
+    """Request to toggle mute (this is not debounced)."""
     new_mute_status = not is_muted
     print(f"--- Requesting mute: {'STUMM' if new_mute_status else 'AN'} ---")
     asyncio.run_coroutine_threadsafe(
