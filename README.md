@@ -1,4 +1,4 @@
-# Beatnik Knob - Snapcast Volume Controller
+# Beatnik Knob - Beatnik & Snapcast Client Volume Controller
 
 A hardware volume controller for Snapcast using a rotary encoder on Raspberry Pi.
 
