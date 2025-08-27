@@ -1,223 +1,184 @@
-# Beatnik Knob Installation Guide for Raspberry Pi
+# Installation Guide - Beatnik Knob on Raspberry Pi
 
 ## Prerequisites
 
-- Raspberry Pi (3B+ or newer recommended) with Debian Bookworm Lite
-- MicroSD card (16GB or larger)
-- Rotary encoder module (KY-040 or compatible)
-- Jumper wires
-- Internet connection for the Pi
+- Raspberry Pi with Debian Bookworm Lite
+- Rotary encoder (KY-040 or similar)
+- Internet connection
 
 ## Step-by-Step Installation
 
-### 1. Prepare Raspberry Pi OS
+### 1. Prepare Your Raspberry Pi
 
-1. **Download Raspberry Pi OS Lite (Bookworm)**:
-   - Visit [rpi.org](https://www.raspberrypi.org/software/operating-systems/)
-   - Download "Raspberry Pi OS Lite (64-bit)" with Debian Bookworm
+Flash Raspberry Pi OS Lite to SD card and boot your Pi.
 
-2. **Flash to SD Card**:
-   - Use Raspberry Pi Imager or balenaEtcher
-   - Enable SSH and configure WiFi during imaging (recommended)
+### 2. Connect Hardware
 
-3. **Boot and Initial Setup**:
-   ```bash
-   # Update system
-   sudo apt update && sudo apt upgrade -y
-   
-   # Enable GPIO interface
-   sudo raspi-config
-   # Navigate to: Interface Options > GPIO > Enable
-   ```
-
-### 2. Hardware Setup
-
-**Wiring the Rotary Encoder**:
+Wire the rotary encoder to your Raspberry Pi:
 
 ```
-Rotary Encoder    Raspberry Pi
-    CLK     →     GPIO 17 (Pin 11)
-    DT      →     GPIO 18 (Pin 12)
-    SW      →     GPIO 27 (Pin 13)
-    VCC     →     3.3V    (Pin 1)
-    GND     →     Ground  (Pin 6)
+Rotary Encoder → Raspberry Pi
+CLK     → GPIO 17 (Pin 11)
+DT      → GPIO 18 (Pin 12)  
+SW      → GPIO 27 (Pin 13)
+VCC     → 3.3V    (Pin 1)
+GND     → Ground  (Pin 6)
 ```
 
-**Visual Pin Layout** (looking at Pi from above, GPIO pins at top):
-```
-3.3V  [1] [2]  5V
-      [3] [4]  5V
-      [5] [6]  GND  ← Connect encoder GND here
-      [7] [8]
-      [9] [10]
-CLK → [11][12] ← DT
-SW  → [13][14]
-```
+### 3. Update System
 
-### 3. Software Installation
-
-1. **Clone the Repository**:
-   ```bash
-   cd ~
-   git clone https://github.com/Idrimi/beatnik-knob.git
-   cd beatnik-knob
-   ```
-
-2. **Run Automated Setup**:
-   ```bash
-   chmod +x setup.sh
-   sudo ./setup.sh
-   ```
-   
-   The setup script will:
-   - Install Python dependencies
-   - Configure GPIO permissions
-   - Set up system services
-   - Create example configuration
-
-3. **Manual Installation** (if automated setup fails):
-   ```bash
-   # Install Python packages
-   pip3 install --user gpiozero websockets
-   
-   # Add user to gpio group
-   sudo usermod -a -G gpio $USER
-   
-   # Logout and login for group changes to take effect
-   ```
-
-### 4. Configuration
-
-1. **Find Your Snapcast Client ID**:
-   ```bash
-   # Method 1: Using curl and jq
-   curl -s http://YOUR_SNAPCAST_SERVER:1780/jsonrpc \
-     -d '{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}' | \
-     jq '.result.server.groups[].clients[].id'
-   
-   # Method 2: Check Snapcast web interface
-   # Open http://YOUR_SNAPCAST_SERVER:1780 in browser
-   ```
-
-2. **Edit Configuration**:
-   ```bash
-   cd ~/beatnik-knob/rotary
-   nano snapcast-volume-rotary.py
-   ```
-   
-   Update these lines:
-   ```python
-   SNAPCAST_URI = "ws://YOUR_SERVER_IP:1780/jsonrpc"
-   SNAPCAST_CLIENT_ID = "YOUR_CLIENT_ID_HERE"
-   ```
-
-### 5. Testing
-
-1. **Test Hardware**:
-   ```bash
-   cd ~/beatnik-knob/rotary
-   python3 rotary-encoder-test.py
-   ```
-   
-   You should see output when rotating the encoder and pressing the button.
-
-2. **Test Volume Controller**:
-   ```bash
-   python3 snapcast-volume-rotary.py
-   ```
-   
-   Expected output:
-   ```
-   🔌 Trying to connect to ws://your-server:1780/jsonrpc...
-   ✅ WebSocket connection established!
-   ✅ Initial state synced: Volume is 50%, Mute is AN
-   ```
-
-### 6. Set Up as System Service
-
-1. **Install Service File**:
-   ```bash
-   sudo cp ~/beatnik-knob/beatnik-knob.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   ```
-
-2. **Enable and Start Service**:
-   ```bash
-   sudo systemctl enable beatnik-knob.service
-   sudo systemctl start beatnik-knob.service
-   ```
-
-3. **Check Service Status**:
-   ```bash
-   sudo systemctl status beatnik-knob.service
-   journalctl -u beatnik-knob.service -f
-   ```
-
-## Troubleshooting
-
-### Common Issues
-
-**"Permission denied" GPIO errors**:
 ```bash
-# Add user to gpio group and reboot
+sudo apt update
+sudo apt upgrade -y
+```
+
+### 4. Install Dependencies
+
+```bash
+# Install system packages
+sudo apt install -y python3 python3-pip git curl jq nano
+
+# Install Python libraries
+pip3 install --user gpiozero websockets
+```
+
+### 5. Configure Permissions
+
+```bash
+# Add user to gpio group
 sudo usermod -a -G gpio $USER
+
+# Logout and login (or reboot) for changes to take effect
 sudo reboot
 ```
 
-**"Module not found" errors**:
+### 6. Get the Code
+
 ```bash
-# Reinstall Python packages
+# Clone repository
+git clone https://github.com/Idrimi/beatnik-knob.git
+cd beatnik-knob
+
+# Make scripts executable  
+chmod +x rotary/*.py
+```
+
+### 7. Find Your Snapcast Client ID
+
+```bash
+# Replace YOUR_SERVER_IP with your Snapcast server IP
+curl -s http://YOUR_SERVER_IP:1780/jsonrpc \
+  -d '{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}' | \
+  jq '.result.server.groups[].clients[].id'
+```
+
+### 8. Configure the Script
+
+```bash
+nano rotary/snapcast-volume-rotary.py
+```
+
+Edit these lines:
+```python
+SNAPCAST_URI = "ws://YOUR_SERVER_IP:1780/jsonrpc"
+SNAPCAST_CLIENT_ID = "YOUR_CLIENT_ID_FROM_STEP_7"
+```
+
+### 9. Test Hardware
+
+```bash
+cd rotary
+python3 rotary-encoder-test.py
+```
+
+You should see output when rotating and pressing the encoder.
+
+### 10. Run the Volume Controller
+
+```bash
+python3 snapcast-volume-rotary.py
+```
+
+If successful, you'll see:
+```
+🔌 Trying to connect to ws://your-server:1780/jsonrpc...
+✅ WebSocket connection established!
+✅ Initial state synced: Volume is 50%, Mute is AN
+```
+
+## Make it Run Automatically (Optional)
+
+### Create System Service
+
+```bash
+sudo nano /etc/systemd/system/beatnik-knob.service
+```
+
+Add this content (adjust paths if needed):
+```ini
+[Unit]
+Description=Beatnik Knob Volume Controller
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=gpio
+WorkingDirectory=/home/pi/beatnik-knob/rotary
+ExecStart=/usr/bin/python3 snapcast-volume-rotary.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Enable and Start Service
+
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable service to start on boot
+sudo systemctl enable beatnik-knob.service
+
+# Start service now
+sudo systemctl start beatnik-knob.service
+
+# Check status
+sudo systemctl status beatnik-knob.service
+```
+
+## Troubleshooting
+
+### Permission Denied Errors
+Make sure you rebooted after adding user to gpio group:
+```bash
+groups  # Should show 'gpio' in the list
+```
+
+### Python Import Errors
+Reinstall packages:
+```bash
 pip3 install --user --force-reinstall gpiozero websockets
 ```
 
-**Cannot connect to Snapcast server**:
+### Cannot Connect to Server
+Test connectivity:
 ```bash
-# Test connectivity
-ping YOUR_SNAPCAST_SERVER
-telnet YOUR_SNAPCAST_SERVER 1780
-
-# Check if server is running
-curl http://YOUR_SNAPCAST_SERVER:1780/jsonrpc \
-  -d '{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}'
+ping YOUR_SERVER_IP
+telnet YOUR_SERVER_IP 1780
 ```
 
-**Encoder not responding**:
-- Double-check wiring connections
-- Verify GPIO pin numbers in code match your wiring
-- Test with multimeter if available
+### Hardware Not Responding
+- Double-check wiring
+- Verify GPIO pins match your configuration
+- Test individual components
 
-### Getting Help
+### Service Issues
+Check logs:
+```bash
+journalctl -u beatnik-knob.service -f
+```
 
-1. **Check system logs**:
-   ```bash
-   journalctl -u beatnik-knob.service -n 50
-   ```
-
-2. **Run in debug mode**:
-   ```bash
-   cd ~/beatnik-knob/rotary
-   python3 -u snapcast-volume-rotary.py
-   ```
-
-3. **Verify hardware connections**:
-   ```bash
-   # Check GPIO state
-   gpio readall  # If gpio command is available
-   ```
-
-## Performance Tips
-
-- Use a Class 10 or better SD card for best performance
-- Consider using a USB 3.0 flash drive as root filesystem for better I/O
-- Ensure stable power supply (proper power adapter, not USB power from PC)
-- Keep the Pi cool with adequate ventilation or heatsinks
-
-## Next Steps
-
-Once everything is working:
-- Customize volume step size and other settings
-- Create additional hardware controls (more buttons, LEDs, etc.)
-- Integrate with other home automation systems
-- Set up monitoring and alerting for the service
-
-Enjoy your physical Snapcast volume control! 🎵
+You're all set! Your rotary encoder should now control Snapcast volume. 🎵
