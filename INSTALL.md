@@ -38,8 +38,8 @@ sudo apt upgrade -y
 # Install system packages
 sudo apt install -y python3 python3-pip git curl jq nano
 
-# Install Python libraries
-pip3 install --user gpiozero websockets
+# Install Python libraries from system repositories
+sudo apt install -y python3-gpiozero python3-websockets
 ```
 
 ### 5. Configure Permissions
@@ -160,7 +160,7 @@ groups  # Should show 'gpio' in the list
 ### Python Import Errors
 Reinstall packages:
 ```bash
-pip3 install --user --force-reinstall gpiozero websockets
+sudo apt install --reinstall python3-gpiozero python3-websockets
 ```
 
 ### Cannot Connect to Server

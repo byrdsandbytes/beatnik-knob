@@ -27,8 +27,8 @@ sudo apt install -y python3 python3-pip git curl jq nano
 
 ### 2. Install Python Dependencies
 ```bash
-# Install Python packages
-pip3 install --user gpiozero websockets
+# Install Python packages from system repositories
+sudo apt install -y python3-gpiozero python3-websockets
 
 # Add user to gpio group
 sudo usermod -a -G gpio $USER
@@ -113,7 +113,28 @@ sudo systemctl start beatnik-knob.service
 
 **Import errors**: 
 ```bash
-pip3 install --user --force-reinstall gpiozero websockets
+sudo apt install --reinstall python3-gpiozero python3-websockets
 ```
 
 **Connection errors**: Verify Snapcast server IP and that port 1780 is accessible
+
+**Service logging and debugging**:
+```bash
+# Check service status
+sudo systemctl status beatnik-knob.service
+
+# View recent logs
+journalctl -u beatnik-knob.service -n 50
+
+# Follow logs in real-time
+journalctl -u beatnik-knob.service -f
+
+# View logs from today
+journalctl -u beatnik-knob.service --since today
+
+# View logs with timestamps
+journalctl -u beatnik-knob.service -o short-iso
+
+# Restart service and watch logs
+sudo systemctl restart beatnik-knob.service && journalctl -u beatnik-knob.service -f
+```
