@@ -1,0 +1,28 @@
+[Unit]
+Description=Beatnik Knob Snapcast Volume Controller
+After=network.target snapclient.service
+Wants=snapclient.service
+
+[Service]
+Type=simple
+User=pi
+Group=gpio
+WorkingDirectory=/home/pi/beatnik-knob/rotary
+ExecStart=/usr/bin/python3 /home/pi/beatnik-knob/rotary/snapcast-volume-rotary.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables (optional)
+Environment=PYTHONUNBUFFERED=1
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/pi/beatnik-knob
+
+[Install]
+WantedBy=multi-user.target
