@@ -14,37 +14,21 @@ Connect your rotary encoder to the Raspberry Pi:
 | VCC            | 3.3V              | 1   |
 | GND            | Ground            | 6   |
 
-## Installation Steps
+## Installation
 
-### 1. System Setup
+You can install the necessary packages and set up permissions by running the installation script.
+
 ```bash
-# Update system packages
-sudo apt update && sudo apt upgrade -y
+# Make the script executable
+chmod +x install.sh
 
-# Install required packages
-sudo apt install -y python3 python3-pip git curl jq nano
+# Run the installation script
+sudo ./install.sh
 ```
 
-### 2. Install Python Dependencies
-```bash
-# Install Python packages from system repositories
-sudo apt install -y python3-gpiozero python3-websockets
+After the script completes, you will need to **reboot your Raspberry Pi** for the permission changes to take effect.
 
-# Add user to gpio group
-sudo usermod -a -G gpio $USER
-
-# Logout and login again for group changes to take effect
-```
-
-### 3. Clone and Setup Project
-```bash
-# Clone the repository
-git clone https://github.com/Idrimi/beatnik-knob.git
-cd beatnik-knob
-
-# Make scripts executable
-chmod +x rotary/*.py
-```
+For manual installation steps, please see the `INSTALL.md` file.
 
 ### 4. Configure Snapcast Connection
 ```bash
