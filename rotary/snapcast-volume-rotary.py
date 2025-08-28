@@ -4,47 +4,70 @@ import websockets
 import time
 from gpiozero import RotaryEncoder, Button
 
-# --- Konfiguration ---
+# --- Configuration ---
 SNAPCAST_URI = "ws://beatnik-server.local:1780/jsonrpc"
 SNAPCAST_CLIENT_ID = "2c:cf:67:d4:b1:95"
 VOLUME_STEP = 5
-DEBOUNCE_DELAY_S = 0.1 # --- NEW: Wait 100ms after the last turn to send the command ---
+DEBOUNCE_DELAY_S = 0.2  # Send update 200ms after the last rotation
 
-# --- GPIO Konfiguration ---
+# --- GPIO Configuration ---
 PIN_CLK = 17
 PIN_DT = 18
 PIN_SW = 27
 
-# --- Globale Variablen für den Zustand ---
+# --- Global State ---
 current_volume = 0
 is_muted = False
 websocket = None
-debounce_timer_task = None # --- NEW: Task for debouncing ---
+debouncer = None  # Debouncer instance will be created in main
 
-# --- Initialisierung der GPIO-Komponenten ---
+# --- GPIO Components ---
 encoder = RotaryEncoder(PIN_CLK, PIN_DT, max_steps=0, wrap=False)
 button = Button(PIN_SW, pull_up=True)
 
-# --- Asynchrone Funktionen ---
+# --- Optimized Debouncer Class ---
+class Debouncer:
+    """A robust debouncer that sends the final volume after a pause in rotation."""
+    def __init__(self, loop, delay, callback):
+        self._loop = loop
+        self._delay = delay
+        self._callback = callback
+        self._task = None
+
+    def trigger(self):
+        """Triggers the debouncer. Resets the timer if already running."""
+        if self._task:
+            self._task.cancel()
+        self._task = self._loop.create_task(self._fire())
+
+    async def _fire(self):
+        """Waits for the delay and then executes the callback."""
+        try:
+            await asyncio.sleep(self._delay)
+            await self._callback()
+        except asyncio.CancelledError:
+            pass  # Ignore cancellation, as it's part of the debounce logic
+
+# --- Asynchronous Functions ---
 
 async def send_rpc_request(method, params={}, request_id=None):
-    """Prepares and sends a JSON-RPC request over the active WebSocket."""
-    if websocket:
-        if request_id is None:
-            request_id = int(time.time())
-        request = {"id": request_id, "jsonrpc": "2.0", "method": method, "params": params}
-        await websocket.send(json.dumps(request))
+    """Prepares and sends a JSON-RPC request."""
+    if not websocket or not websocket.open:
+        print("⚠️ WebSocket is not connected. Cannot send request.")
+        return
+    if request_id is None:
+        request_id = int(time.time())
+    request = {"id": request_id, "jsonrpc": "2.0", "method": method, "params": params}
+    await websocket.send(json.dumps(request))
 
-# --- NEW: An async task that sends the volume after a delay ---
-async def debounced_volume_sender():
-    """Waits for the debounce delay, then sends the final volume."""
-    await asyncio.sleep(DEBOUNCE_DELAY_S)
-    print(f"⚡️ Sending debounced volume: {current_volume}%")
+async def send_volume_update():
+    """Sends the current volume to the server."""
+    print(f"⚡️ Sending final volume: {current_volume}%")
     volume_payload = {"percent": current_volume, "muted": is_muted}
     await send_rpc_request("Client.SetVolume", {"id": SNAPCAST_CLIENT_ID, "volume": volume_payload})
 
 def handle_notification(data):
-    """Parses notifications from the server and updates the authoritative state."""
+    """Parses notifications from the server and updates the state."""
     global current_volume, is_muted
     method, params = data.get("method"), data.get("params", {})
     if params.get("id") != SNAPCAST_CLIENT_ID: return
@@ -58,10 +81,10 @@ def handle_notification(data):
         new_mute_status = params.get("mute")
         if new_mute_status is not None and is_muted != new_mute_status:
             is_muted = new_mute_status
-            print(f"🔇 Synced mute from server: {'STUMM' if is_muted else 'AN'}")
+            print(f"🔇 Synced mute from server: {'Muted' if is_muted else 'Unmuted'}")
 
 def handle_initial_state(data):
-    """Parses the full server status to set the initial state."""
+    """Parses the server status to set the initial state."""
     global current_volume, is_muted
     try:
         clients = data["result"]["server"]["groups"][0]["clients"]
@@ -69,50 +92,50 @@ def handle_initial_state(data):
         if client_state:
             current_volume = client_state["config"]["volume"]["percent"]
             is_muted = client_state["config"]["volume"]["muted"]
-            print(f"✅ Initial state synced: Volume is {current_volume}%, Mute is {'STUMM' if is_muted else 'AN'}")
+            print(f"✅ Initial state synced: Volume is {current_volume}%, Mute is {'Muted' if is_muted else 'Unmuted'}")
         else:
             print(f"⚠️ Client ID {SNAPCAST_CLIENT_ID} not found on server.")
     except (KeyError, TypeError, StopIteration):
         print("⛔️ Error: Could not parse the server state structure.")
 
-# --- GPIO Callback-Funktionen ---
-
-def update_volume_and_debounce():
-    """Cancels any pending send and schedules a new one."""
-    global debounce_timer_task
-    # Cancel the previously scheduled task, if any
-    if debounce_timer_task:
-        debounce_timer_task.cancel()
-    # Schedule the new task to run after the delay
-    debounce_timer_task = asyncio.run_coroutine_threadsafe(debounced_volume_sender(), main_loop)
+# --- GPIO Callback Functions ---
 
 def on_rotate_clockwise():
     """Increase volume locally and trigger the debouncer."""
     global current_volume
     current_volume = min(100, current_volume + VOLUME_STEP)
-    print(f"-> Knob set to: {current_volume}%")
-    update_volume_and_debounce()
+    print(f"-> Volume set to: {current_volume}%")
+    if debouncer:
+        debouncer.trigger()
 
 def on_rotate_counter_clockwise():
     """Decrease volume locally and trigger the debouncer."""
     global current_volume
     current_volume = max(0, current_volume - VOLUME_STEP)
-    print(f"<- Knob set to: {current_volume}%")
-    update_volume_and_debounce()
+    print(f"<- Volume set to: {current_volume}%")
+    if debouncer:
+        debouncer.trigger()
 
 def on_button_press():
-    """Request to toggle mute (this is not debounced)."""
+    """Request to toggle mute (not debounced)."""
     new_mute_status = not is_muted
-    print(f"--- Requesting mute: {'STUMM' if new_mute_status else 'AN'} ---")
-    asyncio.run_coroutine_threadsafe(
-        send_rpc_request("Client.SetMute", {"id": SNAPCAST_CLIENT_ID, "mute": new_mute_status}),
-        main_loop
-    )
+    print(f"--- Requesting mute: {'Mute' if new_mute_status else 'Unmute'} ---")
+    # Use asyncio.create_task if loop is running, otherwise run_coroutine_threadsafe
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(send_rpc_request("Client.SetMute", {"id": SNAPCAST_CLIENT_ID, "mute": new_mute_status}))
+    except RuntimeError:
+        # Fallback if called when the loop is not running (less likely with this structure)
+        asyncio.run(send_rpc_request("Client.SetMute", {"id": SNAPCAST_CLIENT_ID, "mute": new_mute_status}))
 
-# --- Hauptlogik ---
+# --- Main Logic ---
 async def main():
     """The main asynchronous function that manages the connection and tasks."""
-    global websocket
+    global websocket, debouncer
+    
+    loop = asyncio.get_running_loop()
+    debouncer = Debouncer(loop, DEBOUNCE_DELAY_S, send_volume_update)
+
     while True:
         print(f"🔌 Trying to connect to {SNAPCAST_URI}...")
         try:
@@ -120,6 +143,7 @@ async def main():
                 websocket = ws
                 print("✅ WebSocket connection established!")
                 await send_rpc_request("Server.GetStatus", request_id=1)
+                
                 async for message in websocket:
                     data = json.loads(message)
                     if "method" in data:
@@ -137,8 +161,7 @@ if __name__ == "__main__":
     encoder.when_rotated_counter_clockwise = on_rotate_counter_clockwise
     button.when_pressed = on_button_press
     
-    main_loop = asyncio.get_event_loop()
     try:
-        main_loop.run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nProgrammed stopped by user.")
+        print("\nProgram stopped by user.")
